@@ -5,7 +5,7 @@ import VoiceWaveform from "@/components/VoiceWaveform";
 import ConfigUploader from "@/components/ConfigUploader";
 import ConversationDisplay from "@/components/ConversationDisplay";
 import { useToast } from "@/hooks/use-toast";
-import { AudioRecorder, encodeAudioForAPI, AudioQueue } from "@/utils/audioProcessor";
+import { RealtimeChat } from "@/utils/audioProcessor";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface Message {
@@ -21,11 +21,42 @@ const Index = () => {
   const [configuration, setConfiguration] = useState("");
   const { toast } = useToast();
   
-  const wsRef = useRef<WebSocket | null>(null);
-  const recorderRef = useRef<AudioRecorder | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const audioQueueRef = useRef<AudioQueue | null>(null);
+  const chatRef = useRef<RealtimeChat | null>(null);
   const currentTranscriptRef = useRef("");
+
+  const handleMessage = (event: any) => {
+    console.log("Message event:", event.type);
+    
+    if (event.type === 'conversation.item.input_audio_transcription.completed') {
+      const userText = event.transcript;
+      if (userText) {
+        setMessages(prev => [...prev, {
+          role: 'user',
+          content: userText,
+          timestamp: new Date()
+        }]);
+      }
+    } else if (event.type === 'response.audio_transcript.delta') {
+      currentTranscriptRef.current += event.delta;
+    } else if (event.type === 'response.audio_transcript.done') {
+      const assistantText = currentTranscriptRef.current;
+      if (assistantText) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: assistantText,
+          timestamp: new Date()
+        }]);
+      }
+      currentTranscriptRef.current = "";
+    } else if (event.type === 'error') {
+      console.error("OpenAI error:", event);
+      toast({
+        title: "Error",
+        description: event.error?.message || "An error occurred",
+        variant: "destructive",
+      });
+    }
+  };
 
   const startConversation = async () => {
     try {
@@ -38,130 +69,17 @@ const Index = () => {
         return;
       }
 
-      // Request microphone access
-      await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      // Initialize audio context and queue
-      audioContextRef.current = new AudioContext({ sampleRate: 24000 });
-      audioQueueRef.current = new AudioQueue(audioContextRef.current);
-
-      // Connect to WebSocket
-      const ws = new WebSocket(
-        `wss://djhnozyevniidpoqdhsd.supabase.co/functions/v1/ai-receptionist`
-      );
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log("WebSocket connected");
-        setIsConnected(true);
-        
-        // Wait for session.created event before sending session.update
-        const checkSessionCreated = (event: MessageEvent) => {
-          const data = JSON.parse(event.data);
-          if (data.type === 'session.created') {
-            console.log("Session created, sending configuration");
-            
-            // Send session configuration
-            ws.send(JSON.stringify({
-              type: 'session.update',
-              session: {
-                modalities: ['text', 'audio'],
-                instructions: `You are a professional AI receptionist. Here is your configuration:\n\n${configuration}\n\nUse this information to assist callers with their requests. Be helpful, professional, and execute tasks as defined in your configuration.`,
-                voice: 'alloy',
-                input_audio_format: 'pcm16',
-                output_audio_format: 'pcm16',
-                input_audio_transcription: {
-                  model: 'whisper-1'
-                },
-                turn_detection: {
-                  type: 'server_vad',
-                  threshold: 0.5,
-                  prefix_padding_ms: 300,
-                  silence_duration_ms: 1000
-                },
-                temperature: 0.8,
-                max_response_output_tokens: 'inf'
-              }
-            }));
-            
-            ws.removeEventListener('message', checkSessionCreated);
-          }
-        };
-        
-        ws.addEventListener('message', checkSessionCreated);
-      };
-
-      ws.onmessage = async (event) => {
-        const data = JSON.parse(event.data);
-        console.log("Received:", data.type);
-
-        if (data.type === 'response.audio.delta') {
-          setIsSpeaking(true);
-          const binaryString = atob(data.delta);
-          const bytes = new Uint8Array(binaryString.length);
-          for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-          }
-          await audioQueueRef.current?.addToQueue(bytes);
-        } else if (data.type === 'response.audio.done') {
-          setIsSpeaking(false);
-        } else if (data.type === 'conversation.item.input_audio_transcription.completed') {
-          const userText = data.transcript;
-          if (userText) {
-            setMessages(prev => [...prev, {
-              role: 'user',
-              content: userText,
-              timestamp: new Date()
-            }]);
-          }
-        } else if (data.type === 'response.audio_transcript.delta') {
-          currentTranscriptRef.current += data.delta;
-        } else if (data.type === 'response.audio_transcript.done') {
-          const assistantText = currentTranscriptRef.current;
-          if (assistantText) {
-            setMessages(prev => [...prev, {
-              role: 'assistant',
-              content: assistantText,
-              timestamp: new Date()
-            }]);
-          }
-          currentTranscriptRef.current = "";
-        } else if (data.type === 'error') {
-          console.error("OpenAI error:", data);
-          toast({
-            title: "Error",
-            description: data.error?.message || "An error occurred",
-            variant: "destructive",
-          });
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error("WebSocket error:", error);
-        toast({
-          title: "Connection Error",
-          description: "Failed to connect to AI receptionist",
-          variant: "destructive",
-        });
-      };
-
-      ws.onclose = () => {
-        console.log("WebSocket closed");
-        setIsConnected(false);
-        setIsSpeaking(false);
-      };
-
-      // Start audio recording
-      recorderRef.current = new AudioRecorder((audioData) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'input_audio_buffer.append',
-            audio: encodeAudioForAPI(audioData)
-          }));
-        }
+      toast({
+        title: "Connecting...",
+        description: "Setting up AI receptionist connection",
       });
-      await recorderRef.current.start();
 
+      const instructions = `You are a professional AI receptionist. Here is your configuration:\n\n${configuration}\n\nUse this information to assist callers with their requests. Be helpful, professional, and execute tasks as defined in your configuration.`;
+
+      chatRef.current = new RealtimeChat(handleMessage, setIsSpeaking);
+      await chatRef.current.init(instructions);
+      
+      setIsConnected(true);
       toast({
         title: "Connected",
         description: "AI receptionist is now active",
@@ -177,10 +95,7 @@ const Index = () => {
   };
 
   const endConversation = () => {
-    recorderRef.current?.stop();
-    wsRef.current?.close();
-    audioQueueRef.current?.clear();
-    audioContextRef.current?.close();
+    chatRef.current?.disconnect();
     setIsConnected(false);
     setIsSpeaking(false);
   };
