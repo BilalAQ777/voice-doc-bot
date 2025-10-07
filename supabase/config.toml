@@ -2,3 +2,6 @@ project_id = "djhnozyevniidpoqdhsd"
 
 [functions.get-session-token]
 verify_jwt = false
+
+[functions.twilio-voice]
+verify_jwt = false
