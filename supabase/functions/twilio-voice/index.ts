@@ -16,8 +16,11 @@ serve(async (req) => {
   if (req.method === 'POST' && url.pathname.endsWith('/incoming')) {
     console.log("Incoming call from Twilio");
     
-    // Get the WebSocket URL for this edge function
-    const wsUrl = url.origin.replace('https://', 'wss://') + url.pathname.replace('/incoming', '/stream');
+    // Get the WebSocket URL for this edge function (remove /incoming from path)
+    const basePath = url.pathname.replace('/incoming', '');
+    const wsUrl = `wss://djhnozyevniidpoqdhsd.supabase.co/functions/v1/twilio-voice`;
+    
+    console.log("WebSocket URL:", wsUrl);
     
     // Return TwiML to connect the call to our WebSocket
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -26,6 +29,8 @@ serve(async (req) => {
     <Stream url="${wsUrl}" />
   </Connect>
 </Response>`;
+
+    console.log("Returning TwiML:", twiml);
 
     return new Response(twiml, {
       headers: {
