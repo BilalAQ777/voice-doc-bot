@@ -74,7 +74,19 @@ const Index = () => {
         description: "Setting up AI receptionist connection",
       });
 
-      const instructions = `You are a professional AI receptionist. Here is your configuration:\n\n${configuration}\n\nUse this information to assist callers with their requests. Be helpful, professional, and execute tasks as defined in your configuration.`;
+      const instructions = `You are a professional AI receptionist. Here is your configuration:
+
+${configuration}
+
+CRITICAL RULES:
+1. ALWAYS greet the customer first when the call starts. Start speaking immediately with a greeting in German.
+2. You can ONLY speak German and English. Default language is German.
+3. If the customer speaks English or asks to switch to English, switch to English for the rest of the conversation.
+4. Before executing ANY task, you MUST collect: customer name, email, address, and phone number. Ask for these one by one if not provided.
+5. Never execute a task without collecting all required customer information first.
+6. Be professional, friendly, and efficient.
+
+Use the configuration information to assist callers with their requests.`;
 
       chatRef.current = new RealtimeChat(handleMessage, setIsSpeaking);
       await chatRef.current.init(instructions);
